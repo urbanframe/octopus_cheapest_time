@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Step 1 of 2 — Rate Entities",
+        "description": "Enter your two OctopusEnergy electricity rate event entities. These are shared by all tasks and only need to be entered once.",
+        "data": {
+          "current_rate_entity": "Today's rates entity (current_day_rates)",
+          "next_rate_entity": "Tomorrow's rates entity (next_day_rates)"
+        }
+      },
+      "first_task": {
+        "title": "Step 2 of 2 — First Task",
+        "description": "Add your first task. You can add more tasks by running 'Add Integration' again.",
+        "data": {
+          "task_name": "Task name (e.g. Dishwasher)",
+          "task_duration": "Duration (minutes)"
+        }
+      },
+      "add_task": {
+        "title": "Add Another Task",
+        "description": "The rate entities from your first setup will be reused automatically.",
+        "data": {
+          "task_name": "Task name (e.g. Washing Machine)",
+          "task_duration": "Duration (minutes)"
+        }
+      }
+    },
+    "error": {
+      "entity_required": "Please enter a valid entity ID.",
+      "name_required": "Please enter a task name.",
+      "invalid_duration": "Duration must be between 1 and 1440 minutes."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit Task",
+        "description": "Update the name or duration. To change rate entities, remove and re-add the integration.",
+        "data": {
+          "task_name": "Task name",
+          "task_duration": "Duration (minutes)"
+        }
+      }
+    },
+    "error": {
+      "name_required": "Please enter a task name.",
+      "invalid_duration": "Duration must be between 1 and 1440 minutes."
+    }
+  }
+}

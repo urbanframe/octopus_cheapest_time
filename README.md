@@ -1,134 +1,162 @@
 # Octopus Energy – Cheapest Time Scheduler
 
-A Home Assistant custom integration that reads upcoming electricity rates from the [BottlecapDave HomeAssistant-OctopusEnergy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy) integration and calculates the **cheapest time window** to run a task.
+A Home Assistant custom integration that reads upcoming electricity rates from the [BottlecapDave HomeAssistant-OctopusEnergy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy) integration and calculates the cheapest time window to run a task.
 
 ---
 
 ## Features
 
-- Add **multiple tasks** (e.g. "Dishwasher", "EV Charge", "Washing Machine")
-- Each task gets its own **sensor** showing the optimal start time
-- Configurable **task duration** (in minutes)
-- Configurable **search window** (how many hours ahead to look, 1–48)
-- Sensor attributes include:
-  - `cheapest_start` – ISO timestamp of best start
-  - `cheapest_end` – ISO timestamp of task completion
-  - `time_until_start_hours` – hours until start, **rounded to nearest 0.5**
-  - `average_cost_per_kwh` – average rate across the window (p/kWh)
-  - `task_duration_minutes` – the configured duration
-  - `cheapest_windows` – top 5 cheapest windows for reference
-  - `total_slots_checked` – how many windows were evaluated
-- Updates every **5 minutes** automatically
-- Edit settings at any time via the **Options** flow (no re-setup needed)
+- Add **multiple tasks** (e.g. Dishwasher, EV Charge, Washing Machine) — each gets its own sensor
+- Merges **today's and tomorrow's** Agile rates into a single 48-hour window automatically
+- Each sensor state is the **cheapest start time** as a timestamp (displays in your local timezone)
+- Sensor attributes include cost in both **£/kWh and pence/kWh**
+- `time_until_start_hours` is always **rounded to the nearest 0.5 hours**
+- Updates every **5 minutes**
+- Edit task name or duration at any time via **Configure** — no re-setup needed
 
 ---
 
 ## Prerequisites
 
-1. Home Assistant (2023.x or later)
+1. Home Assistant 2024.1 or later
 2. [BottlecapDave HomeAssistant-OctopusEnergy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy) installed and configured
-3. Your Octopus Energy tariff must provide upcoming rates (Agile tariff works best; Go and Flexible tariffs also work)
+3. An Octopus Agile tariff (other tariffs that provide half-hourly rate schedules will also work)
 
 ---
 
 ## Installation
 
-### Via HACS (recommended)
-
-1. Open HACS → **Integrations** → three-dot menu → **Custom repositories**
-2. Add your repository URL, category: **Integration**
-3. Search for "Octopus Cheapest Time" and install
-4. Restart Home Assistant
-
 ### Manual
 
 1. Copy the `custom_components/octopus_cheapest_time/` folder into your HA `config/custom_components/` directory
-2. Restart Home Assistant
+2. Delete any existing `__pycache__` folder inside it if updating from a previous version
+3. Restart Home Assistant
+
+### Via HACS
+
+1. Open HACS → **Integrations** → three-dot menu → **Custom repositories**
+2. Add your repository URL with category **Integration**
+3. Search for "Octopus Cheapest Time" and install, then restart Home Assistant
 
 ---
 
 ## Setup
 
+### Step 1 — Add the integration (once)
+
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **"Octopus Energy - Cheapest Time Scheduler"**
-3. Fill in the form:
+3. Enter your two OctopusEnergy rate event entities:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| **Task Name** | A friendly name for your task | `Dishwasher` |
-| **Task Duration (minutes)** | How long the task runs | `90` |
-| **Octopus Energy Rate Entity** | The entity with upcoming rates | `sensor.octopus_energy_electricity_<mpan>_<serial>_current_rate` |
-| **Search Window (hours)** | How far ahead to look | `24` |
+| **Today's rates entity** | The `current_day_rates` event entity | `event.octopus_energy_electricity_20e5081399_2500000908478_current_day_rates` |
+| **Tomorrow's rates entity** | The `next_day_rates` event entity | `event.octopus_energy_electricity_20e5081399_2500000908478_next_day_rates` |
 
-4. Click **Submit** — a new sensor is created immediately.
-5. Repeat for as many tasks as you like.
+These are entered **once** and shared across all tasks. If OctopusEnergy entities appear in a dropdown, you can select them directly.
+
+### Step 2 — Add your first task
+
+Immediately after entering the rate entities you are prompted for:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| **Task name** | A friendly label | `Dishwasher` |
+| **Duration (minutes)** | How long the task runs | `90` |
+
+A sensor named `sensor.cheapest_start_dishwasher` is created straight away.
+
+### Adding more tasks
+
+Go to **Settings → Devices & Services → Add Integration** again and search for the same integration. Because the rate entities are already configured you will be taken straight to the task name/duration form. Each new task creates an additional sensor.
 
 ---
 
-## Which rate entity to use?
+## Finding your rate entity IDs
 
-In the OctopusEnergy integration, look for a sensor with `rates` in its attributes. Common entity IDs look like:
+In Developer Tools → States, look for event entities matching this pattern:
 
 ```
-sensor.octopus_energy_electricity_1234567890_12A1234567_current_rate
+event.octopus_energy_electricity_<serial>_<mpan>_current_day_rates
+event.octopus_energy_electricity_<serial>_<mpan>_next_day_rates
 ```
 
-You can verify it's the right one by checking **Developer Tools → States**, finding the entity, and confirming it has a `rates` attribute containing a list of upcoming slots.
+You can confirm they are correct by checking that their attributes include a `rates` list containing half-hourly slots with `start`, `end`, and `value_inc_vat` keys.
+
+> **Note:** `current_day_rates` always covers from now until midnight. `next_day_rates` covers midnight through the following midnight and is published at around **4pm each day**. Before 4pm, `next_day_rates` may be empty — the integration will still find the cheapest window using the remaining slots from today.
 
 ---
 
-## Sensor Output
+## Sensor reference
 
 ### State
-The sensor state is an **ISO 8601 timestamp** of the cheapest start time, compatible with HA's `timestamp` device class (displays in your local timezone).
 
-### Attributes example
+An **ISO 8601 timestamp** of the cheapest available start time. Home Assistant displays this in your local timezone. The value is `unknown` if no suitable window is found (e.g. before tomorrow's rates are published and today's rates are all in the past).
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `cheapest_start` | ISO timestamp | Start of the cheapest window |
+| `cheapest_end` | ISO timestamp | End of the cheapest window (start + duration) |
+| `average_cost_per_kwh` | float | Average rate across the window in **£/kWh** inc VAT |
+| `average_cost_pence_per_kwh` | float | Same value in **pence/kWh** inc VAT |
+| `time_until_start_hours` | float | Hours until the cheapest start, **rounded to nearest 0.5** |
+| `task_duration_minutes` | int | The configured task duration |
+| `current_rate_entity` | string | The today's rates entity being used |
+| `next_rate_entity` | string | The tomorrow's rates entity being used |
+| `today_rate_slots` | int | Number of half-hourly slots loaded from today's entity |
+| `tomorrow_rate_slots` | int | Number of half-hourly slots loaded from tomorrow's entity |
+| `total_windows_checked` | int | Total number of candidate windows evaluated |
+| `cheapest_windows` | list | Top 5 cheapest windows (start, end, pence/kWh each) |
+
+### Example attributes
 
 ```yaml
-cheapest_start: "2024-01-15T02:00:00+00:00"
-cheapest_end:   "2024-01-15T03:30:00+00:00"
-average_cost_per_kwh: 8.5
-time_until_start_hours: 3.5      # rounded to nearest 0.5
+cheapest_start: "2026-03-11T02:00:00+00:00"
+cheapest_end:   "2026-03-11T03:30:00+00:00"
+average_cost_per_kwh: 0.07378
+average_cost_pence_per_kwh: 7.378
+time_until_start_hours: 3.5
 task_duration_minutes: 90
-search_window_hours: 24
-rate_entity: "sensor.octopus_energy_electricity_..."
-total_slots_checked: 42
+current_rate_entity: "event.octopus_energy_electricity_20e5081399_2500000908478_current_day_rates"
+next_rate_entity: "event.octopus_energy_electricity_20e5081399_2500000908478_next_day_rates"
+today_rate_slots: 46
+tomorrow_rate_slots: 48
+total_windows_checked: 61
 cheapest_windows:
-  - start: "2024-01-15T02:00:00+00:00"
-    end:   "2024-01-15T03:30:00+00:00"
-    average_cost_per_kwh: 8.5
-  - start: "2024-01-15T02:30:00+00:00"
-    end:   "2024-01-15T04:00:00+00:00"
-    average_cost_per_kwh: 9.1
-  ...
+  - start: "2026-03-11T02:00:00+00:00"
+    end:   "2026-03-11T03:30:00+00:00"
+    average_cost_pence_per_kwh: 7.378
+  - start: "2026-03-11T02:30:00+00:00"
+    end:   "2026-03-11T04:00:00+00:00"
+    average_cost_pence_per_kwh: 8.484
+  - start: "2026-03-11T01:30:00+00:00"
+    end:   "2026-03-11T03:00:00+00:00"
+    average_cost_pence_per_kwh: 9.12
 ```
 
 ---
 
-## Automation Example
+## Automation examples
 
-Turn on a smart plug at the cheapest time:
+### Trigger a switch at the cheapest time
 
 ```yaml
 alias: "Start Dishwasher at Cheapest Time"
 trigger:
-  - platform: template
-    value_template: >
-      {{ now() >= states('sensor.cheapest_start_dishwasher') | as_datetime }}
-condition:
-  - condition: template
-    value_template: >
-      {{ state_attr('sensor.cheapest_start_dishwasher', 'time_until_start_hours') == 0 }}
+  - platform: time
+    at: "sensor.cheapest_start_dishwasher"
 action:
   - service: switch.turn_on
     target:
       entity_id: switch.dishwasher_plug
 ```
 
-Or trigger with a time trigger using the sensor value:
+### Send a notification when the cheapest time is found
 
 ```yaml
-alias: "Cheapest Time Notify"
+alias: "Notify cheapest dishwasher window"
 trigger:
   - platform: state
     entity_id: sensor.cheapest_start_dishwasher
@@ -136,41 +164,47 @@ action:
   - service: notify.mobile_app_my_phone
     data:
       message: >
-        Best time to run dishwasher:
+        Best time to run the dishwasher:
         {{ state_attr('sensor.cheapest_start_dishwasher', 'cheapest_start') }}
-        (in {{ state_attr('sensor.cheapest_start_dishwasher', 'time_until_start_hours') }} hours)
-        at {{ state_attr('sensor.cheapest_start_dishwasher', 'average_cost_per_kwh') }}p/kWh avg
+        in {{ state_attr('sensor.cheapest_start_dishwasher', 'time_until_start_hours') }} hours
+        at {{ state_attr('sensor.cheapest_start_dishwasher', 'average_cost_pence_per_kwh') }}p/kWh avg
 ```
 
 ---
 
 ## How the algorithm works
 
-1. Reads the `rates` attribute from your chosen OctopusEnergy entity — this is a list of 30-minute price slots
-2. Filters to only future slots within the search window
-3. Uses a **sliding window** approach: for every possible start slot, it accumulates consecutive 30-min slots until the task duration is covered
-4. Calculates the **average cost per kWh** for each window
-5. Sorts by cost ascending and returns the cheapest option as the sensor state
-6. The `time_until_start_hours` attribute is the difference between now and the cheapest start, **rounded to the nearest 0.5 hours**
-
----
-
-## Troubleshooting
-
-**Sensor shows "unavailable"**
-- Check the rate entity ID is correct
-- Verify the OctopusEnergy integration is working and the entity has a `rates` attribute
-
-**No windows found**
-- The search window may not have enough future rates yet (Agile rates are published by ~4pm for the next day)
-- Try increasing the search window hours
-
-**Sensor stops updating**
-- Check HA logs for errors from `custom_components.octopus_cheapest_time`
-- Reload the integration via Settings → Devices & Services
+1. Rates are read from both event entities: `current_day_rates` (now until midnight) and `next_day_rates` (midnight to midnight, published ~4pm daily)
+2. The two sets are merged and deduplicated by slot start time
+3. All future slots within the 48-hour window are sorted chronologically
+4. A **sliding window** moves slot-by-slot: for each possible start, contiguous 30-minute slots are accumulated until the full task duration is covered
+5. The average £/kWh is calculated for each candidate window
+6. All windows are sorted cheapest-first; the best is returned as the sensor state
+7. `time_until_start_hours` is rounded to the nearest 0.5 so it's clean to use in notifications and conditions
 
 ---
 
 ## Editing a task
 
-Click **Configure** on any task in Settings → Devices & Services to change the duration, rate entity, or search window. The sensor reloads automatically.
+Click **Configure** on any task entry in **Settings → Devices & Services** to update the task name or duration. The sensor reloads automatically with the new values.
+
+> The rate entities (today/tomorrow) are set once at integration level and are not editable via Configure. To change them, remove the integration and add it again.
+
+---
+
+## Troubleshooting
+
+**Sensor is `unknown` or `unavailable`**
+Rates may not be loaded yet — the integration retries every 5 minutes. Check that the OctopusEnergy integration is working and the rate entities have a `rates` attribute with slots in it.
+
+**`today_rate_slots` is 0**
+Check the `current_rate_entity` ID is correct and that the OctopusEnergy integration has fetched rates successfully. `current_day_rates` should always have slots.
+
+**`tomorrow_rate_slots` is 0**
+This is normal before ~4pm — Agile rates for the next day are published around that time. The sensor will continue working with today's remaining rates and pick up tomorrow's automatically once they appear.
+
+**No windows found**
+All of today's remaining slots have passed and tomorrow's rates haven't been published yet. This can occur in the early afternoon before ~4pm. The sensor will recover automatically once tomorrow's rates are published.
+
+**Sensor stopped updating**
+Check HA logs for errors under `custom_components.octopus_cheapest_time`. Reloading the integration via Settings → Devices & Services usually resolves transient issues.

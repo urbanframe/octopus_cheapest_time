@@ -11,6 +11,7 @@ A Home Assistant custom integration that reads upcoming electricity rates from t
 - Each sensor state is the **cheapest start time** as a timestamp (displays in your local timezone)
 - Sensor attributes include cost in both **£/kWh and pence/kWh**
 - `time_until_start_hours` is always **rounded to the nearest 0.5 hours**
+- A dedicated **numeric sensor** (`sensor.time_until_start_<task>`) exposes hours until start — readable directly by ESPHome and other integrations
 - Updates every **5 minutes**
 - Edit task name or duration at any time via **Configure** — no re-setup needed
 
@@ -89,7 +90,16 @@ You can confirm they are correct by checking that their attributes include a `ra
 
 ## Sensor reference
 
-### State
+Each task creates **two sensors**:
+
+| Sensor | Entity ID pattern | Description |
+|--------|-------------------|-------------|
+| Cheapest Start | `sensor.cheapest_start_<task>` | Timestamp of the cheapest window start |
+| Time Until Start | `sensor.time_until_start_<task>` | Hours until that start, rounded to 0.5 |
+
+### Cheapest Start sensor
+
+#### State
 
 An **ISO 8601 timestamp** of the cheapest available start time. Home Assistant displays this in your local timezone. The value is `unknown` if no suitable window is found (e.g. before tomorrow's rates are published and today's rates are all in the past).
 
@@ -136,6 +146,20 @@ cheapest_windows:
     average_cost_pence_per_kwh: 9.12
 ```
 
+### Time Until Start sensor
+
+#### State
+
+A **float** representing hours until the cheapest start time, rounded to the nearest 0.5. Returns `unknown` if no window is found.
+
+| Value | Meaning |
+|-------|---------|
+| `0.0` | Start now (window is current or just passed) |
+| `0.5` | Start in 30 minutes |
+| `3.5` | Start in 3.5 hours |
+
+This sensor is suitable for direct use in **ESPHome** via the `homeassistant` sensor platform, dashboard conditions, and notification messages without needing a template sensor.
+
 ---
 
 ## Automation examples
@@ -181,6 +205,36 @@ action:
 5. The average £/kWh is calculated for each candidate window
 6. All windows are sorted cheapest-first; the best is returned as the sensor state
 7. `time_until_start_hours` is rounded to the nearest 0.5 so it's clean to use in notifications and conditions
+
+---
+
+## ESPHome example
+
+The `sensor.time_until_start_<task>` sensor can be read directly in ESPHome — no template sensor needed in HA.
+
+```yaml
+sensor:
+  - platform: homeassistant
+    id: wash_40deg_start
+    entity_id: sensor.time_until_start_40degwash
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: return (isnan(id(wash_40deg_start).state));
+            then:
+              - lvgl.label.update:
+                  id: InfoDisplaywash_40deg_start
+                  text: "TBC"
+            else:
+              - lvgl.label.update:
+                  id: InfoDisplaywash_40deg_start
+                  text:
+                    format: "%.1f Hrs"
+                    args: [ 'x' ]
+```
+
+The `isnan` check handles the `unknown` state (no rates available yet). The value is already rounded to 0.5 so `"%.1f"` will always display cleanly as `0.0`, `0.5`, `1.0`, `1.5` etc.
 
 ---
 

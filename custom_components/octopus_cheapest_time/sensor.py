@@ -272,11 +272,17 @@ async def async_setup_entry(
     # temporary unavailability of OctopusEnergy entities during HA startup
     # does not permanently fail the config entry — the coordinator will retry.
     await coordinator.async_refresh()
-    async_add_entities([CheapestTimeSensor(coordinator, entry)], True)
+    async_add_entities(
+        [
+            CheapestTimeSensor(coordinator, entry),
+            TimeUntilStartSensor(coordinator, entry),
+        ],
+        True,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Sensor entity
+# Sensor: cheapest start timestamp
 # ---------------------------------------------------------------------------
 
 class CheapestTimeSensor(CoordinatorEntity, SensorEntity):
@@ -350,3 +356,43 @@ class CheapestTimeSensor(CoordinatorEntity, SensorEntity):
             ATTR_TOTAL_WINDOWS: len(windows),
             ATTR_ALL_WINDOWS: top5,
         }
+
+
+# ---------------------------------------------------------------------------
+# Sensor: hours until cheapest start (numeric — usable by ESPHome directly)
+# ---------------------------------------------------------------------------
+
+class TimeUntilStartSensor(CoordinatorEntity, SensorEntity):
+    """
+    A plain numeric sensor exposing time_until_start_hours.
+
+    Rounded to the nearest 0.5 h, same as the attribute on CheapestTimeSensor.
+    ESPHome and other integrations can subscribe to this directly without
+    needing a template sensor in HA.
+
+    Entity ID example: sensor.time_until_start_40degwash
+    """
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "h"
+    _attr_icon = "mdi:timer-sand"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: CheapestTimeCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        slug = coordinator.task_name.lower().replace(" ", "_")
+        self._attr_unique_id = f"{DOMAIN}_{slug}_time_until_start"
+        self._attr_name = f"Time Until Start: {coordinator.task_name}"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return hours until the cheapest start, rounded to nearest 0.5."""
+        if not self.coordinator.data:
+            return None
+        windows = self.coordinator.data.get("windows", [])
+        if not windows:
+            return None
+        now: datetime = self.coordinator.data["now"]
+        raw_hours = (windows[0]["start"] - now).total_seconds() / 3600
+        return _round_to_half_hour(max(raw_hours, 0.0))

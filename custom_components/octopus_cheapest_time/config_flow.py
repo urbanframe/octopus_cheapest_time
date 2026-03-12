@@ -2,27 +2,28 @@
 
 Architecture
 ============
-One config entry per TASK. Each entry holds:
-  - current_rate_entity  }  copied from the first setup and editable
-  - next_rate_entity     }  only by removing/re-adding the integration
+One config entry per TASK. Each entry holds all four values:
+  - current_rate_entity
+  - next_rate_entity
   - task_name
   - task_duration
 
 Setup flow (2 steps):
-  Step 1 (user)        — enter the two rate entities ONCE.
-                         The unique_id guard prevents a second hub being added.
+  Step 1 (user)        — enter the two rate entities (shown once; subsequent
+                         "Add Integration" runs skip straight to add_task).
   Step 2 (first_task)  — enter the first task name + duration.
-                         Creates the config entry with all four values.
 
 Adding more tasks:
-  Run "Add Integration" again → the unique_id guard fires → user is shown
-  the "add_task" step which only asks for name + duration and re-uses the
-  rate entities already stored in the existing entry.
+  Run "Add Integration" again → skips to add_task, reusing saved entities.
 
-Options flow (per entry — name + duration only):
-  Editing is limited to task_name and task_duration so there are no
-  vol.In() / dropdown conflicts. Rate entities are intentionally read-only
-  here; remove and re-add the integration to change them.
+Options flow (menu with two choices):
+  "Edit task"           — change name / duration for this entry only.
+  "Update rate entities" — change the two entity IDs; change is propagated
+                           to ALL existing task entries automatically.
+
+IMPORTANT: entity fields in the options flow always use cv.string (plain text),
+never vol.In(), to avoid the 500 Internal Server Error caused by schema
+conflicts when HA loads the options form.
 """
 from __future__ import annotations
 
@@ -39,8 +40,6 @@ from .const import (
     CONF_TASK_NAME,
     CONF_TASK_DURATION,
 )
-
-_HUB_UNIQUE_ID = f"{DOMAIN}_hub"
 
 
 # ---------------------------------------------------------------------------
@@ -59,12 +58,13 @@ def _octopus_entities(hass: HomeAssistant) -> list[str]:
 
 
 def _entity_validator(hass: HomeAssistant) -> vol.Validator:
+    """Dropdown if OctopusEnergy entities are found, otherwise free text."""
     entities = _octopus_entities(hass)
     return vol.In(entities) if entities else cv.string
 
 
-def _existing_hub_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
-    """Return the first existing entry for this domain (any task holds the entity config)."""
+def _existing_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
+    """Return the first existing entry for this domain."""
     entries = hass.config_entries.async_entries(DOMAIN)
     return entries[0] if entries else None
 
@@ -76,6 +76,25 @@ def _task_schema(defaults: dict | None = None) -> vol.Schema:
         vol.Required(CONF_TASK_DURATION, default=d.get(CONF_TASK_DURATION, 60)): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=1440)
         ),
+    })
+
+
+def _rate_entity_schema(defaults: dict | None = None) -> vol.Schema:
+    """
+    Schema for the rate entity fields.
+    Always uses cv.string — never vol.In() — so it is safe to use in the
+    options flow without risking a 500 error.
+    """
+    d = defaults or {}
+    return vol.Schema({
+        vol.Required(
+            CONF_CURRENT_RATE_ENTITY,
+            default=d.get(CONF_CURRENT_RATE_ENTITY, ""),
+        ): cv.string,
+        vol.Required(
+            CONF_NEXT_RATE_ENTITY,
+            default=d.get(CONF_NEXT_RATE_ENTITY, ""),
+        ): cv.string,
     })
 
 
@@ -92,23 +111,15 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._current_entity: str = ""
         self._next_entity: str = ""
 
-    # ------------------------------------------------------------------
-    # Entry point
-    # ------------------------------------------------------------------
     async def async_step_user(self, user_input: dict | None = None):
-        """
-        First run  → show entity pickers (step 1 of 2).
-        Subsequent → skip to add_task using saved entity config.
-        """
-        existing = _existing_hub_entry(self.hass)
+        """First run → entity setup. Subsequent runs → add_task directly."""
+        existing = _existing_entry(self.hass)
         if existing is not None:
-            # Rate entities already configured — go straight to add a task
             saved = {**existing.data, **existing.options}
             self._current_entity = saved.get(CONF_CURRENT_RATE_ENTITY, "")
             self._next_entity = saved.get(CONF_NEXT_RATE_ENTITY, "")
             return await self.async_step_add_task()
 
-        # First-time setup
         errors: dict = {}
         if user_input is not None:
             self._current_entity = user_input[CONF_CURRENT_RATE_ENTITY].strip()
@@ -130,9 +141,6 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    # ------------------------------------------------------------------
-    # Step 2a — first task (collected right after entity setup)
-    # ------------------------------------------------------------------
     async def async_step_first_task(self, user_input: dict | None = None):
         errors: dict = {}
         if user_input is not None:
@@ -158,9 +166,6 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    # ------------------------------------------------------------------
-    # Step 2b — add another task (re-uses saved entity config)
-    # ------------------------------------------------------------------
     async def async_step_add_task(self, user_input: dict | None = None):
         errors: dict = {}
         if user_input is not None:
@@ -193,13 +198,30 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 # ---------------------------------------------------------------------------
-# Options flow — task name + duration ONLY (no entity pickers → no errors)
+# Options flow — menu → edit task OR update rate entities
 # ---------------------------------------------------------------------------
 
 class OctopusCheapestTimeOptionsFlow(config_entries.OptionsFlow):
-    """Edit a task's name and duration only."""
+    """
+    Two-option menu:
+      1. Edit task  — name + duration for this entry only.
+      2. Update rate entities — entity IDs propagated to all task entries.
+    """
 
     async def async_step_init(self, user_input: dict | None = None):
+        """Show a menu: edit task or update rate entities."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options={
+                "edit_task": "Edit task name / duration",
+                "rate_entities": "Update rate entities",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Menu option 1: edit task name + duration
+    # ------------------------------------------------------------------
+    async def async_step_edit_task(self, user_input: dict | None = None):
         errors: dict = {}
         current = {**self.config_entry.data, **self.config_entry.options}
 
@@ -214,7 +236,45 @@ class OctopusCheapestTimeOptionsFlow(config_entries.OptionsFlow):
                 return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
-            step_id="init",
+            step_id="edit_task",
             data_schema=_task_schema(current),
             errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Menu option 2: update rate entities across all task entries
+    # ------------------------------------------------------------------
+    async def async_step_rate_entities(self, user_input: dict | None = None):
+        errors: dict = {}
+        current = {**self.config_entry.data, **self.config_entry.options}
+
+        if user_input is not None:
+            current_entity = user_input[CONF_CURRENT_RATE_ENTITY].strip()
+            next_entity = user_input[CONF_NEXT_RATE_ENTITY].strip()
+
+            if not current_entity:
+                errors[CONF_CURRENT_RATE_ENTITY] = "entity_required"
+            elif not next_entity:
+                errors[CONF_NEXT_RATE_ENTITY] = "entity_required"
+            else:
+                # Propagate the new entity IDs to every task entry in the domain
+                for entry in self.hass.config_entries.async_entries(DOMAIN):
+                    new_data = {
+                        **entry.data,
+                        CONF_CURRENT_RATE_ENTITY: current_entity,
+                        CONF_NEXT_RATE_ENTITY: next_entity,
+                    }
+                    self.hass.config_entries.async_update_entry(entry, data=new_data)
+
+                # Return empty options — the real change is in entry.data above
+                return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="rate_entities",
+            data_schema=_rate_entity_schema(current),
+            errors=errors,
+            description_placeholders={
+                "current": current.get(CONF_CURRENT_RATE_ENTITY, ""),
+                "next": current.get(CONF_NEXT_RATE_ENTITY, ""),
+            },
         )

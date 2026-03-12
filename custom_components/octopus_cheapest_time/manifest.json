@@ -1,7 +1,7 @@
 {
   "domain": "octopus_cheapest_time",
   "name": "Octopus Energy - Cheapest Time Scheduler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "documentation": "https://github.com/your-repo/octopus-cheapest-time",
   "dependencies": [],
   "codeowners": [],

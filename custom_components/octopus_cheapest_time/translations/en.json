@@ -1,1 +1,73 @@
-
+{
+  "title": "Octopus Cheapest Time",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Step 1 of 2 \u2014 Rate Entities",
+        "data": {
+          "current_rate_entity": "Today's rates entity",
+          "next_rate_entity": "Tomorrow's rates entity"
+        },
+        "data_description": {
+          "current_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_current_day_rates",
+          "next_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_next_day_rates"
+        },
+        "description": "Select your OctopusEnergy rate event entities. {help}"
+      },
+      "first_task": {
+        "title": "Step 2 of 2 \u2014 First Task",
+        "description": "Add your first task. You can add more tasks by running 'Add Integration' again.",
+        "data": {
+          "task_name": "Task name (e.g. Dishwasher)",
+          "task_duration": "Duration (minutes)"
+        }
+      },
+      "add_task": {
+        "title": "Add Another Task",
+        "description": "The rate entities from your first setup will be reused automatically.",
+        "data": {
+          "task_name": "Task name (e.g. Washing Machine)",
+          "task_duration": "Duration (minutes)"
+        }
+      }
+    },
+    "error": {
+      "entity_required": "Please enter a valid entity ID.",
+      "name_required": "Please enter a task name.",
+      "invalid_duration": "Duration must be between 1 and 1440 minutes."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Task",
+        "description": "What would you like to update?"
+      },
+      "edit_task": {
+        "title": "Edit Task Name / Duration",
+        "description": "Update the name or duration for this task.",
+        "data": {
+          "task_name": "Task name",
+          "task_duration": "Duration (minutes)"
+        }
+      },
+      "rate_entities": {
+        "title": "Update Rate Entities",
+        "data": {
+          "current_rate_entity": "Today's rates entity",
+          "next_rate_entity": "Tomorrow's rates entity"
+        },
+        "data_description": {
+          "current_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_current_day_rates",
+          "next_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_next_day_rates"
+        },
+        "description": "Select the OctopusEnergy rate event entities. This applies to all tasks. {help}"
+      }
+    },
+    "error": {
+      "entity_required": "Please enter a valid entity ID.",
+      "name_required": "Please enter a task name.",
+      "invalid_duration": "Duration must be between 1 and 1440 minutes."
+    }
+  }
+}

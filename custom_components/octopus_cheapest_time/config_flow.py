@@ -32,6 +32,16 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 from .const import (
     DOMAIN,
@@ -57,10 +67,16 @@ def _octopus_entities(hass: HomeAssistant) -> list[str]:
     return sorted(found)
 
 
-def _entity_validator(hass: HomeAssistant) -> vol.Validator:
-    """Dropdown if OctopusEnergy entities are found, otherwise free text."""
+def _entity_selector(hass: HomeAssistant) -> SelectSelector | TextSelector:
+    """SelectSelector with dropdown if entities found, else TextSelector."""
     entities = _octopus_entities(hass)
-    return vol.In(entities) if entities else cv.string
+    if entities:
+        return SelectSelector(SelectSelectorConfig(
+            options=entities,
+            mode=SelectSelectorMode.DROPDOWN,
+            custom_value=True,
+        ))
+    return TextSelector(TextSelectorConfig())
 
 
 def _existing_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
@@ -72,29 +88,26 @@ def _existing_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
 def _task_schema(defaults: dict | None = None) -> vol.Schema:
     d = defaults or {}
     return vol.Schema({
-        vol.Required(CONF_TASK_NAME, default=d.get(CONF_TASK_NAME, "")): cv.string,
-        vol.Required(CONF_TASK_DURATION, default=d.get(CONF_TASK_DURATION, 60)): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=1440)
+        vol.Required(CONF_TASK_NAME, default=d.get(CONF_TASK_NAME, "")): TextSelector(TextSelectorConfig()),
+        vol.Required(CONF_TASK_DURATION, default=d.get(CONF_TASK_DURATION, 60)): NumberSelector(
+            NumberSelectorConfig(min=1, max=1440, step=1, mode=NumberSelectorMode.BOX)
         ),
     })
 
 
-def _rate_entity_schema(defaults: dict | None = None) -> vol.Schema:
-    """
-    Schema for the rate entity fields.
-    Always uses cv.string — never vol.In() — so it is safe to use in the
-    options flow without risking a 500 error.
-    """
+def _rate_entity_schema(hass: HomeAssistant, defaults: dict | None = None) -> vol.Schema:
+    """Schema for the rate entity fields. Uses selector API so data_description renders."""
     d = defaults or {}
+    sel = _entity_selector(hass)
     return vol.Schema({
         vol.Required(
             CONF_CURRENT_RATE_ENTITY,
             default=d.get(CONF_CURRENT_RATE_ENTITY, ""),
-        ): cv.string,
+        ): sel,
         vol.Required(
             CONF_NEXT_RATE_ENTITY,
             default=d.get(CONF_NEXT_RATE_ENTITY, ""),
-        ): cv.string,
+        ): sel,
     })
 
 
@@ -131,14 +144,11 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return await self.async_step_first_task()
 
-        sel = _entity_validator(self.hass)
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_CURRENT_RATE_ENTITY, default=""): sel,
-                vol.Required(CONF_NEXT_RATE_ENTITY, default=""): sel,
-            }),
+            data_schema=_rate_entity_schema(self.hass),
             errors=errors,
+            description_placeholders={"help": ""},
         )
 
     async def async_step_first_task(self, user_input: dict | None = None):
@@ -271,10 +281,7 @@ class OctopusCheapestTimeOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="rate_entities",
-            data_schema=_rate_entity_schema(current),
+            data_schema=_rate_entity_schema(self.hass, current),
             errors=errors,
-            description_placeholders={
-                "current": current.get(CONF_CURRENT_RATE_ENTITY, ""),
-                "next": current.get(CONF_NEXT_RATE_ENTITY, ""),
-            },
+            description_placeholders={"help": ""},
         )

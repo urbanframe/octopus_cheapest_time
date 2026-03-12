@@ -1,16 +1,21 @@
 {
+  "title": "Octopus Cheapest Time",
   "config": {
     "step": {
       "user": {
-        "title": "Step 1 of 2 — Rate Entities",
-        "description": "Enter your two OctopusEnergy electricity rate event entities. These are shared by all tasks and only need to be entered once.",
+        "title": "Step 1 of 2 \u2014 Rate Entities",
         "data": {
-          "current_rate_entity": "Today's rates entity (current_day_rates)",
-          "next_rate_entity": "Tomorrow's rates entity (next_day_rates)"
-        }
+          "current_rate_entity": "Today's rates entity",
+          "next_rate_entity": "Tomorrow's rates entity"
+        },
+        "data_description": {
+          "current_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_current_day_rates",
+          "next_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_next_day_rates"
+        },
+        "description": "Select your OctopusEnergy rate event entities. {help}"
       },
       "first_task": {
-        "title": "Step 2 of 2 — First Task",
+        "title": "Step 2 of 2 \u2014 First Task",
         "description": "Add your first task. You can add more tasks by running 'Add Integration' again.",
         "data": {
           "task_name": "Task name (e.g. Dishwasher)",
@@ -48,11 +53,15 @@
       },
       "rate_entities": {
         "title": "Update Rate Entities",
-        "description": "Change the OctopusEnergy rate event entities. This will be applied to all tasks.",
         "data": {
-          "current_rate_entity": "Today's rates entity (current_day_rates)",
-          "next_rate_entity": "Tomorrow's rates entity (next_day_rates)"
-        }
+          "current_rate_entity": "Today's rates entity",
+          "next_rate_entity": "Tomorrow's rates entity"
+        },
+        "data_description": {
+          "current_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_current_day_rates",
+          "next_rate_entity": "e.g. event.octopus_energy_electricity_SERIAL_MPAN_next_day_rates"
+        },
+        "description": "Select the OctopusEnergy rate event entities. This applies to all tasks. {help}"
       }
     },
     "error": {

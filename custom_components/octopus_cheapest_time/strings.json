@@ -35,15 +35,28 @@
   "options": {
     "step": {
       "init": {
-        "title": "Edit Task",
-        "description": "Update the name or duration. To change rate entities, remove and re-add the integration.",
+        "title": "Configure Task",
+        "description": "What would you like to update?"
+      },
+      "edit_task": {
+        "title": "Edit Task Name / Duration",
+        "description": "Update the name or duration for this task.",
         "data": {
           "task_name": "Task name",
           "task_duration": "Duration (minutes)"
         }
+      },
+      "rate_entities": {
+        "title": "Update Rate Entities",
+        "description": "Change the OctopusEnergy rate event entities. This will be applied to all tasks.",
+        "data": {
+          "current_rate_entity": "Today's rates entity (current_day_rates)",
+          "next_rate_entity": "Tomorrow's rates entity (next_day_rates)"
+        }
       }
     },
     "error": {
+      "entity_required": "Please enter a valid entity ID.",
       "name_required": "Please enter a task name.",
       "invalid_duration": "Duration must be between 1 and 1440 minutes."
     }

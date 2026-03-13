@@ -7,17 +7,18 @@ One config entry per TASK. Each entry holds all four values:
   - next_rate_entity
   - task_name
   - task_duration
+  - threshold_pence  (optional — 0 means no threshold)
 
 Setup flow (2 steps):
   Step 1 (user)        — enter the two rate entities (shown once; subsequent
                          "Add Integration" runs skip straight to add_task).
-  Step 2 (first_task)  — enter the first task name + duration.
+  Step 2 (first_task)  — enter the first task name, duration, and threshold.
 
 Adding more tasks:
   Run "Add Integration" again → skips to add_task, reusing saved entities.
 
 Options flow (menu with two choices):
-  "Edit task"           — change name / duration for this entry only.
+  "Edit task"           — change name / duration / threshold for this entry only.
   "Update rate entities" — change the two entity IDs; change is propagated
                            to ALL existing task entries automatically.
 
@@ -49,6 +50,7 @@ from .const import (
     CONF_NEXT_RATE_ENTITY,
     CONF_TASK_NAME,
     CONF_TASK_DURATION,
+    CONF_THRESHOLD_PENCE,
 )
 
 
@@ -88,9 +90,14 @@ def _existing_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
 def _task_schema(defaults: dict | None = None) -> vol.Schema:
     d = defaults or {}
     return vol.Schema({
-        vol.Required(CONF_TASK_NAME, default=d.get(CONF_TASK_NAME, "")): TextSelector(TextSelectorConfig()),
+        vol.Required(CONF_TASK_NAME, default=d.get(CONF_TASK_NAME, "")): TextSelector(
+            TextSelectorConfig()
+        ),
         vol.Required(CONF_TASK_DURATION, default=d.get(CONF_TASK_DURATION, 60)): NumberSelector(
             NumberSelectorConfig(min=1, max=1440, step=1, mode=NumberSelectorMode.BOX)
+        ),
+        vol.Required(CONF_THRESHOLD_PENCE, default=d.get(CONF_THRESHOLD_PENCE, 100)): NumberSelector(
+            NumberSelectorConfig(min=0, max=100, step=0.1, unit_of_measurement="p/kWh", mode=NumberSelectorMode.BOX)
         ),
     })
 
@@ -156,6 +163,7 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             name = user_input[CONF_TASK_NAME].strip()
             duration = user_input[CONF_TASK_DURATION]
+            threshold = user_input[CONF_THRESHOLD_PENCE]
             if not name:
                 errors[CONF_TASK_NAME] = "name_required"
             elif duration < 1:
@@ -168,6 +176,7 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_NEXT_RATE_ENTITY: self._next_entity,
                         CONF_TASK_NAME: name,
                         CONF_TASK_DURATION: duration,
+                        CONF_THRESHOLD_PENCE: threshold,
                     },
                 )
         return self.async_show_form(
@@ -181,6 +190,7 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             name = user_input[CONF_TASK_NAME].strip()
             duration = user_input[CONF_TASK_DURATION]
+            threshold = user_input[CONF_THRESHOLD_PENCE]
             if not name:
                 errors[CONF_TASK_NAME] = "name_required"
             elif duration < 1:
@@ -193,6 +203,7 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_NEXT_RATE_ENTITY: self._next_entity,
                         CONF_TASK_NAME: name,
                         CONF_TASK_DURATION: duration,
+                        CONF_THRESHOLD_PENCE: threshold,
                     },
                 )
         return self.async_show_form(
@@ -214,7 +225,7 @@ class OctopusCheapestTimeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OctopusCheapestTimeOptionsFlow(config_entries.OptionsFlow):
     """
     Two-option menu:
-      1. Edit task  — name + duration for this entry only.
+      1. Edit task  — name + duration + threshold for this entry only.
       2. Update rate entities — entity IDs propagated to all task entries.
     """
 
@@ -223,13 +234,13 @@ class OctopusCheapestTimeOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_menu(
             step_id="init",
             menu_options={
-                "edit_task": "Edit task name / duration",
+                "edit_task": "Edit task name / duration / threshold",
                 "rate_entities": "Update rate entities",
             },
         )
 
     # ------------------------------------------------------------------
-    # Menu option 1: edit task name + duration
+    # Menu option 1: edit task name, duration, and threshold
     # ------------------------------------------------------------------
     async def async_step_edit_task(self, user_input: dict | None = None):
         errors: dict = {}

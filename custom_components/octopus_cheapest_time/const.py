@@ -9,6 +9,7 @@ CONF_NEXT_RATE_ENTITY = "next_rate_entity"
 # Per-task config
 CONF_TASK_NAME = "task_name"
 CONF_TASK_DURATION = "task_duration"
+CONF_THRESHOLD_PENCE = "threshold_pence"
 
 # Always search the full 48-hour window (today + tomorrow rates)
 SEARCH_WINDOW_HOURS = 48
@@ -34,3 +35,4 @@ ATTR_TOTAL_WINDOWS = "total_windows_checked"
 ATTR_ALL_WINDOWS = "cheapest_windows"
 ATTR_CURRENT_RATE_ENTITY = "current_rate_entity"
 ATTR_NEXT_RATE_ENTITY = "next_rate_entity"
+ATTR_THRESHOLD_PENCE = "threshold_pence"

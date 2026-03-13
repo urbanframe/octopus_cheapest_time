@@ -19,7 +19,11 @@
         "description": "Add your first task. You can add more tasks by running 'Add Integration' again.",
         "data": {
           "task_name": "Task name (e.g. Dishwasher)",
-          "task_duration": "Duration (minutes)"
+          "task_duration": "Duration (minutes)",
+          "threshold_pence": "Price threshold (p/kWh)"
+        },
+        "data_description": {
+          "threshold_pence": "Only schedule when a window is at or below this price. Set to 100 to disable and always find the cheapest window regardless of price (including negative rates)."
         }
       },
       "add_task": {
@@ -27,7 +31,11 @@
         "description": "The rate entities from your first setup will be reused automatically.",
         "data": {
           "task_name": "Task name (e.g. Washing Machine)",
-          "task_duration": "Duration (minutes)"
+          "task_duration": "Duration (minutes)",
+          "threshold_pence": "Price threshold (p/kWh)"
+        },
+        "data_description": {
+          "threshold_pence": "Only schedule when a window is at or below this price. Set to 100 to disable and always find the cheapest window regardless of price (including negative rates)."
         }
       }
     },
@@ -44,11 +52,15 @@
         "description": "What would you like to update?"
       },
       "edit_task": {
-        "title": "Edit Task Name / Duration",
-        "description": "Update the name or duration for this task.",
+        "title": "Edit Task Name / Duration / Threshold",
+        "description": "Update the name, duration, or price threshold for this task.",
         "data": {
           "task_name": "Task name",
-          "task_duration": "Duration (minutes)"
+          "task_duration": "Duration (minutes)",
+          "threshold_pence": "Price threshold (p/kWh)"
+        },
+        "data_description": {
+          "threshold_pence": "Only schedule when a window is at or below this price. Set to 100 to disable and always find the cheapest window regardless of price (including negative rates)."
         }
       },
       "rate_entities": {

@@ -2,8 +2,9 @@
 
 Each config entry contains both the hub (rate entity) config AND the task config,
 since the hub + first task are created together in one flow. The hub entry holds
-CONF_CURRENT_RATE_ENTITY, CONF_NEXT_RATE_ENTITY, CONF_TASK_NAME, CONF_TASK_DURATION.
-Options can override CONF_TASK_NAME and CONF_TASK_DURATION.
+CONF_CURRENT_RATE_ENTITY, CONF_NEXT_RATE_ENTITY, CONF_TASK_NAME, CONF_TASK_DURATION,
+and CONF_THRESHOLD_PENCE. Options can override CONF_TASK_NAME, CONF_TASK_DURATION,
+and CONF_THRESHOLD_PENCE.
 
 Startup behaviour
 -----------------
@@ -11,9 +12,17 @@ On HA boot, OctopusEnergy entities are often not yet loaded when this integratio
 initialises. To avoid noisy "No rates found" errors and permanent unavailability:
 
   1. The first coordinator refresh is deferred by STARTUP_DELAY_SECONDS (20 s).
-  2. While rates are absent the coordinator returns None (sensors → 'unavailable')
-     and polls every STARTUP_RETRY_INTERVAL_SECONDS (60 s) — no error is raised.
+  2. While rates are absent the coordinator returns None (sensors -> 'unavailable')
+     and polls every STARTUP_RETRY_INTERVAL_SECONDS (60 s) -- no error is raised.
   3. Once rates are found the poll interval reverts to DEFAULT_SCAN_INTERVAL (5 min).
+
+Threshold behaviour
+-------------------
+If CONF_THRESHOLD_PENCE is set to a value below 100p, windows whose average
+cost exceeds the threshold are discarded. If no window meets the threshold
+both sensors return None (state -> 'unavailable'). A threshold of 100p means
+disabled — all windows are considered regardless of price (including negative
+rates, which are valid on Agile).
 """
 from __future__ import annotations
 
@@ -39,6 +48,7 @@ from .const import (
     CONF_TASK_DURATION,
     CONF_CURRENT_RATE_ENTITY,
     CONF_NEXT_RATE_ENTITY,
+    CONF_THRESHOLD_PENCE,
     SEARCH_WINDOW_HOURS,
     DEFAULT_SCAN_INTERVAL,
     OCTOPUS_ATTR_RATES,
@@ -57,14 +67,12 @@ from .const import (
     ATTR_ALL_WINDOWS,
     ATTR_CURRENT_RATE_ENTITY,
     ATTR_NEXT_RATE_ENTITY,
+    ATTR_THRESHOLD_PENCE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# How long to wait before the very first rate fetch after HA starts
 STARTUP_DELAY_SECONDS = 20
-
-# Poll interval used while waiting for rates to appear (e.g. during HA boot)
 STARTUP_RETRY_INTERVAL_SECONDS = 60
 
 
@@ -78,13 +86,7 @@ def _round_to_1dp(hours: float) -> float:
 
 
 def _extract_rates(hass: HomeAssistant, entity_id: str, label: str) -> list[dict]:
-    """
-    Pull the raw rate list from a state's attributes.
-
-    Checks two locations to handle different OctopusEnergy versions:
-      1. state.attributes["rates"]            — current / confirmed format
-      2. state.attributes["event_data"]["rates"] — older versions
-    """
+    """Pull the raw rate list from a state's attributes."""
     if not entity_id:
         return []
 
@@ -140,7 +142,7 @@ def _parse_slots(raw: list[dict], source: str) -> list[dict]:
             parsed.append({
                 "start": start,
                 "end": end,
-                "value": float(value),          # £/kWh inc VAT
+                "value": float(value),
                 "duration_minutes": (end - start).total_seconds() / 60,
                 "source": source,
             })
@@ -153,14 +155,26 @@ def _find_cheapest_windows(
     slots: list[dict],
     duration_minutes: int,
     now: datetime,
+    threshold_pence: float = 100,
 ) -> list[dict]:
-    """
-    Sliding-window search over contiguous slots.
-    Returns all valid windows sorted cheapest-first.
+    """Sliding-window search. Returns all valid windows sorted cheapest-first.
+
+    If threshold_pence < 100, any slot whose rate exceeds the threshold is
+    excluded before window building begins. This means the sliding window
+    can never span across an above-threshold slot — every slot in every
+    returned window is individually at or below the threshold.
     """
     cutoff = now + timedelta(hours=SEARCH_WINDOW_HOURS)
+
+    def _slot_ok(s: dict) -> bool:
+        if s["start"] < now or s["start"] >= cutoff:
+            return False
+        if threshold_pence < 100 and s["value"] * 100 > threshold_pence:
+            return False
+        return True
+
     future = sorted(
-        [s for s in slots if s["start"] >= now and s["start"] < cutoff],
+        [s for s in slots if _slot_ok(s)],
         key=lambda x: x["start"],
     )
 
@@ -176,7 +190,7 @@ def _find_cheapest_windows(
             slot = future[j]
             if j > i:
                 gap = (slot["start"] - future[j - 1]["end"]).total_seconds() / 60
-                if gap > 1:   # non-contiguous — stop extending this window
+                if gap > 1:
                     break
             needed = duration_minutes - accum
             contrib = min(slot["duration_minutes"], needed)
@@ -184,7 +198,7 @@ def _find_cheapest_windows(
             accum += contrib
             j += 1
 
-        if accum >= duration_minutes - 0.5:   # 30 s tolerance
+        if accum >= duration_minutes - 0.5:
             w_start = future[i]["start"]
             avg = cost / (duration_minutes / 60)
             results.append({
@@ -203,13 +217,7 @@ def _find_cheapest_windows(
 # ---------------------------------------------------------------------------
 
 class CheapestTimeCoordinator(DataUpdateCoordinator):
-    """Polls rate entities and recomputes the cheapest window every 5 minutes.
-
-    While rates are unavailable (e.g. during HA startup) the coordinator
-    returns None and retries every STARTUP_RETRY_INTERVAL_SECONDS without
-    raising an error, so sensors surface as 'unavailable' rather than logging
-    repeated errors.
-    """
+    """Polls rate entities and recomputes the cheapest window every 5 minutes."""
 
     def __init__(
         self,
@@ -218,24 +226,23 @@ class CheapestTimeCoordinator(DataUpdateCoordinator):
         task_duration: int,
         current_entity: str,
         next_entity: str,
+        threshold_pence: float,
     ) -> None:
         self.task_name = task_name
         self.task_duration = task_duration
         self.current_entity = current_entity
         self.next_entity = next_entity
+        self.threshold_pence = threshold_pence
         self._rates_ever_found = False
 
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN}_{task_name}",
-            # Start with the normal interval; it will be shortened to
-            # STARTUP_RETRY_INTERVAL_SECONDS if rates are not yet present.
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
 
     def _set_interval(self, seconds: int) -> None:
-        """Silently adjust the polling interval if it has changed."""
         desired = timedelta(seconds=seconds)
         if self.update_interval != desired:
             self.update_interval = desired
@@ -244,14 +251,8 @@ class CheapestTimeCoordinator(DataUpdateCoordinator):
         today_raw = _extract_rates(self.hass, self.current_entity, "today")
         tomorrow_raw = _extract_rates(self.hass, self.next_entity, "tomorrow")
 
-        # ----------------------------------------------------------------
-        # No rates at all — entity not loaded yet (typical during HA boot)
-        # ----------------------------------------------------------------
         if not today_raw and not tomorrow_raw:
             if not self._rates_ever_found:
-                # Still waiting for OctopusEnergy to populate its entities.
-                # Return None so sensors show 'unavailable'; shorten the
-                # retry interval so we pick them up quickly once they appear.
                 self._set_interval(STARTUP_RETRY_INTERVAL_SECONDS)
                 _LOGGER.debug(
                     "Rates not yet available for task '%s'. "
@@ -260,17 +261,12 @@ class CheapestTimeCoordinator(DataUpdateCoordinator):
                 )
                 return None
             else:
-                # Rates were previously found but have now disappeared —
-                # treat this as a genuine error so it surfaces in HA logs.
                 raise UpdateFailed(
                     f"Rates previously available but now missing. "
                     f"today='{self.current_entity}' "
                     f"tomorrow='{self.next_entity}'"
                 )
 
-        # ----------------------------------------------------------------
-        # Rates are available — restore normal poll interval on first find
-        # ----------------------------------------------------------------
         if not self._rates_ever_found:
             _LOGGER.info(
                 "Rates now available for task '%s'. "
@@ -283,7 +279,6 @@ class CheapestTimeCoordinator(DataUpdateCoordinator):
         today_slots = _parse_slots(today_raw, "today")
         tomorrow_slots = _parse_slots(tomorrow_raw, "tomorrow")
 
-        # Merge and deduplicate by start time
         seen: set = set()
         merged: list[dict] = []
         for slot in today_slots + tomorrow_slots:
@@ -295,16 +290,31 @@ class CheapestTimeCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Rate slots could not be parsed. Check HA logs.")
 
         now = dt_util.utcnow()
-        windows = _find_cheapest_windows(merged, self.task_duration, now)
+        threshold = self.threshold_pence
+        all_windows = _find_cheapest_windows(merged, self.task_duration, now, threshold)
+
+        # all_windows already contains only windows where every slot is at or
+        # below the threshold (handled inside _find_cheapest_windows by
+        # excluding above-threshold slots before building windows).
+        windows = all_windows
+
+        if not windows and threshold < 100:
+            _LOGGER.debug(
+                "Task '%s': no contiguous window found where every slot is at "
+                "or below %.1fp/kWh — sensors will be unavailable.",
+                self.task_name, threshold,
+            )
 
         return {
             "windows": windows,
+            "all_windows_count": len(all_windows),
             "now": now,
             "today_slots": len(today_slots),
             "tomorrow_slots": len(tomorrow_slots),
             "current_entity": self.current_entity,
             "next_entity": self.next_entity,
             "task_duration": self.task_duration,
+            "threshold_pence": threshold,
         }
 
 
@@ -317,13 +327,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Create sensors for this config entry.
-
-    The first coordinator refresh is deferred by STARTUP_DELAY_SECONDS so that
-    OctopusEnergy has time to load its rate entities before we try to read them.
-    Sensors are registered immediately and will show 'unavailable' until the
-    first successful fetch.
-    """
+    """Create sensors for this config entry."""
     cfg = {**entry.data, **entry.options}
 
     coordinator = CheapestTimeCoordinator(
@@ -332,12 +336,11 @@ async def async_setup_entry(
         task_duration=cfg[CONF_TASK_DURATION],
         current_entity=cfg[CONF_CURRENT_RATE_ENTITY],
         next_entity=cfg[CONF_NEXT_RATE_ENTITY],
+        threshold_pence=float(cfg.get(CONF_THRESHOLD_PENCE, 0)),
     )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    # Register entities immediately — they will surface as 'unavailable'
-    # (native_value returns None) until coordinator.data is populated.
     async_add_entities(
         [
             CheapestTimeSensor(coordinator, entry),
@@ -345,15 +348,12 @@ async def async_setup_entry(
         ],
     )
 
-    # Defer the first fetch so OctopusEnergy entities have time to load.
     async def _initial_refresh(_now: datetime | None = None) -> None:
         await coordinator.async_refresh()
 
     cancel_startup_timer = async_call_later(
         hass, STARTUP_DELAY_SECONDS, _initial_refresh
     )
-    # Make sure the timer is cancelled cleanly if the entry is unloaded
-    # before it fires (e.g. during a rapid HA restart).
     entry.async_on_unload(cancel_startup_timer)
 
 
@@ -390,9 +390,11 @@ class CheapestTimeSensor(CoordinatorEntity, SensorEntity):
         data = self.coordinator.data
         windows = data.get("windows", [])
         now: datetime = data["now"]
+        threshold = data["threshold_pence"]
 
         base = {
             ATTR_TASK_DURATION_MINUTES: data["task_duration"],
+            ATTR_THRESHOLD_PENCE: threshold if threshold < 100 else "disabled",
             ATTR_CURRENT_RATE_ENTITY: data["current_entity"],
             ATTR_NEXT_RATE_ENTITY: data["next_entity"],
             ATTR_TODAY_SLOTS: data["today_slots"],
@@ -400,13 +402,16 @@ class CheapestTimeSensor(CoordinatorEntity, SensorEntity):
         }
 
         if not windows:
+            reason = (
+                f"No window found at or below {threshold}p/kWh threshold."
+                if threshold < 100
+                else "No windows found. Tomorrow's rates may not be published yet "
+                     "(Agile publishes ~4pm daily)."
+            )
             return {
                 **base,
                 ATTR_TOTAL_WINDOWS: 0,
-                "message": (
-                    "No windows found. Tomorrow's rates may not be published yet "
-                    "(Agile publishes ~4pm daily)."
-                ),
+                "message": reason,
             }
 
         best = windows[0]
@@ -435,18 +440,14 @@ class CheapestTimeSensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Sensor: hours until cheapest start (numeric — usable by ESPHome directly)
+# Sensor: hours until cheapest start (numeric)
 # ---------------------------------------------------------------------------
 
 class TimeUntilStartSensor(CoordinatorEntity, SensorEntity):
-    """
-    A plain numeric sensor exposing time_until_start_hours.
+    """Numeric sensor: hours until cheapest start, rounded to 1 d.p.
 
-    Rounded to 1 decimal place, same as the attribute on CheapestTimeSensor.
-    ESPHome and other integrations can subscribe to this directly without
-    needing a template sensor in HA.
-
-    Entity ID example: sensor.time_until_start_40degwash
+    Returns None (unavailable) when no window is available or none meet
+    the configured price threshold.
     """
 
     _attr_has_entity_name = True
@@ -463,7 +464,6 @@ class TimeUntilStartSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return hours until the cheapest start, rounded to 1 decimal place."""
         if not self.coordinator.data:
             return None
         windows = self.coordinator.data.get("windows", [])

@@ -55,9 +55,9 @@ _LOGGER = logging.getLogger(__name__)
 # Utility helpers
 # ---------------------------------------------------------------------------
 
-def _round_to_half_hour(hours: float) -> float:
-    """Round to nearest 0.5."""
-    return round(hours * 2) / 2
+def _round_to_1dp(hours: float) -> float:
+    """Round to 1 decimal place."""
+    return round(hours, 1)
 
 
 def _extract_rates(hass: HomeAssistant, entity_id: str, label: str) -> list[dict]:
@@ -335,7 +335,7 @@ class CheapestTimeSensor(CoordinatorEntity, SensorEntity):
 
         best = windows[0]
         raw_hours = (best["start"] - now).total_seconds() / 3600
-        time_until = _round_to_half_hour(max(raw_hours, 0.0))
+        time_until = _round_to_1dp(max(raw_hours, 0.0))
 
         top5 = [
             {
@@ -366,7 +366,7 @@ class TimeUntilStartSensor(CoordinatorEntity, SensorEntity):
     """
     A plain numeric sensor exposing time_until_start_hours.
 
-    Rounded to the nearest 0.5 h, same as the attribute on CheapestTimeSensor.
+    Rounded to 1 decimal place, same as the attribute on CheapestTimeSensor.
     ESPHome and other integrations can subscribe to this directly without
     needing a template sensor in HA.
 
@@ -387,7 +387,7 @@ class TimeUntilStartSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return hours until the cheapest start, rounded to nearest 0.5."""
+        """Return hours until the cheapest start, rounded to 1 decimal place."""
         if not self.coordinator.data:
             return None
         windows = self.coordinator.data.get("windows", [])
@@ -395,4 +395,4 @@ class TimeUntilStartSensor(CoordinatorEntity, SensorEntity):
             return None
         now: datetime = self.coordinator.data["now"]
         raw_hours = (windows[0]["start"] - now).total_seconds() / 3600
-        return _round_to_half_hour(max(raw_hours, 0.0))
+        return _round_to_1dp(max(raw_hours, 0.0))
